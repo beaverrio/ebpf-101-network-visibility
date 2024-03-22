@@ -52,12 +52,9 @@ void print_be32_as_ip(__be32 ip, __u16 proto, __u32 ip_proto) {
 
 SEC("socket")
 int socket_handler(struct __sk_buff *skb) {
-	__u8    verlen;
-	__u16   proto;
-	__u32   nhoff       = ETH_HLEN;
-	__u32   ip_proto    = 0;
-	__u8    hdr_len;
-
+	__u16 proto;
+	__u32 nhoff   	= ETH_HLEN;
+	
 	bpf_skb_load_bytes(skb, 12, &proto, 2);
 	proto = __bpf_ntohs(proto);
 	if (proto != ETH_P_IP) {
@@ -68,44 +65,29 @@ int socket_handler(struct __sk_buff *skb) {
 		return 0;
     }
 
+	__u8 hdr_len;
 	// ip4 header lengths are variable
-	// access ihl as a u8 (linux/include/linux/skbuff.h)
+	// Access ihl as a u8 (linux/include/linux/skbuff.h)
 	bpf_skb_load_bytes(skb, ETH_HLEN, &hdr_len, sizeof(hdr_len));
 	hdr_len &= 0x0f;
 	hdr_len *= 4;
 
-	/* verify hlen meets minimum size requirements */
+	// Verify hlen meets minimum size requirements
 	if (hdr_len < sizeof(struct iphdr)) {
 		return 0;
 	}
 
+	__u32 ip_proto	= 0;
 	bpf_skb_load_bytes(skb, nhoff + offsetof(struct iphdr, protocol), &ip_proto, 1);
 
-    // Is it a TCP packet using protocol field == 6
+    // Is it a TCP packet? Protocol field == 6
 	if (ip_proto == IPPROTO_TCP) {
 		bpf_printk("The packet was sent using protocol %d", ip_proto);
 		
-		__u16 tlen;
-		bpf_skb_load_bytes(skb, nhoff + 0, &verlen, 1);
-		bpf_skb_load_bytes(skb, nhoff + offsetof(struct iphdr, tot_len), &tlen, sizeof(tlen));
-
-		__u8 doff;
-		__u32 tcp_hdr_len = nhoff + hdr_len;
-		bpf_skb_load_bytes(skb, tcp_hdr_len + offsetof(struct __tcphdr, ack_seq) + 4, &doff, sizeof(doff)); // read the first byte past __tcphdr->ack_seq, we can't do offsetof bit fields
-		doff &= 0xf0;																						// clean-up res1
-		doff >>= 4;																							// move the upper 4 bits to low
-		doff *= 4;																							// convert to bytes length
-
-		__u32 payload_offset = 0;
-		__u32 payload_length = 0;
-		payload_offset = ETH_HLEN + hdr_len + doff;
-		payload_length = __bpf_ntohs(tlen) - hdr_len - doff;
-
 		__be32 src_address;
 		__be32 dst_address;
 		bpf_skb_load_bytes(skb, nhoff + offsetof(struct iphdr, saddr), &src_address, 4);
 		bpf_skb_load_bytes(skb, nhoff + offsetof(struct iphdr, daddr), &dst_address, 4);
-	
 	
 		__be16 ports[2];
 		bpf_skb_load_bytes(skb, nhoff + hdr_len, &ports, 4);
